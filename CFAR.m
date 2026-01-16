@@ -10,12 +10,12 @@ RDM = abs(randn(Nr, Nd) + 1i*randn(Nr, Nd)).^2; % 能量矩阵(平方律检波)
 % 目标1: 强目标
 RDM(80, 50) = 50; 
 % 目标2: 弱目标
-RDM(120, 30) = 15;
+RDM(120, 30) = 25;
 % 目标3: 临近目标 (测试保护单元)
 RDM(80, 53) = 40; 
 
 %% 2. 2D CA-CFAR 参数设置
-Pfa = 1e-6;      % 虚警概率 (False Alarm Probability)
+Pfa = 1e-5;      % 虚警概率 (False Alarm Probability)
 Tr = 8;          % 距离维训练单元数 (单侧) Training Cells
 Td = 4;          % 多普勒维训练单元数 (单侧)
 Gr = 2;          % 距离维保护单元数 (单侧) Guard Cells
