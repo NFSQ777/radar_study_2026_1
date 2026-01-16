@@ -64,7 +64,7 @@ grid on;
 
 %% 5. 第一步：脉冲压缩 (Range FFT)
 % 原理：将时域上的长脉冲能量，在频率上聚焦成一个峰
-range_win = hamming(Nr).'; % 加窗抑制旁瓣
+range_win = hamming(Nr).'; % 加汉明窗抑制旁瓣
 range_profile_matrix = zeros(Nd, Nr);
 
 for i = 1:Nd
@@ -101,7 +101,7 @@ subplot(2,2,[3,4]);
 % 使用 mesh 绘制 3D 效果
 samples_to_show_r = find(range_axis > 150, 1); % 只画前150米
 mesh(range_axis(1:samples_to_show_r), vel_axis, db(abs(final_map(:, 1:samples_to_show_r))));
-view(0, 90); % 俯视图
+%view(0, 90); % 俯视图
 colorbar;
 title('相参积累后 (Range-Doppler Map 2D-FFT)');
 xlabel('距离 (m)'); ylabel('速度 (m/s)');
