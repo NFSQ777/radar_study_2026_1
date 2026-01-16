@@ -1,4 +1,4 @@
-clc; clear; close all;
+clc; clear; close all;   
 
 %% 1. 生成模拟的距离-多普勒数据 (Range-Doppler Map)
 % 这里的尺寸是 200x100，背景是高斯白噪声
