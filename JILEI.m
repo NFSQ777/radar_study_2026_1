@@ -1,96 +1,121 @@
-clc; clear; close all;   
+clear; clc; close all;
 
-%% 1. 生成模拟的距离-多普勒数据 (Range-Doppler Map)
-% 这里的尺寸是 200x100，背景是高斯白噪声
-Nr = 200; % 距离单元数
-Nd = 100; % 多普勒单元数
-RDM = abs(randn(Nr, Nd) + 1i*randn(Nr, Nd)).^2; % 能量矩阵(平方律检波)
+%% 1. 雷达参数定义 (System Parameters)
+fc = 77e9;              % 载波频率 77GHz
+c = 3e8;                % 光速
+lambda = c/fc;          % 波长 3.9mm
 
-% 添加几个模拟目标 (信噪比 SNR 不同)
-% 目标1: 强目标
-RDM(80, 50) = 50; 
-% 目标2: 弱目标
-RDM(120, 30) = 15;
-% 目标3: 临近目标 (测试保护单元)
-RDM(80, 53) = 40; 
+B = 200e6;              % 带宽 200MHz (决定距离分辨率)
+Tc = 50e-6;             % 脉冲重复时间 (Chirp持续时间) 50us
+Slope = B/Tc;           % 调频斜率
+Fs = 10e6;              % 采样率 10Msps
 
-%% 2. 2D CA-CFAR 参数设置
-Pfa = 1e-6;      % 虚警概率 (False Alarm Probability)
-Tr = 8;          % 距离维训练单元数 (单侧) Training Cells
-Td = 4;          % 多普勒维训练单元数 (单侧)
-Gr = 2;          % 距离维保护单元数 (单侧) Guard Cells
-Gd = 2;          % 多普勒维保护单元数 (单侧)
+Nr = 512;               % Fast Time: 每个Chirp的采样点数 (距离维)
+Nd = 128;               % Slow Time: 发射Chirp的数量 (用于相参积累)
 
-%% 3. 构建 CFAR 卷积掩码 (Kernel)
-% 掩码就像一个“甜甜圈”：
-% 中间是 0 (忽略 CUT 和 保护单元)
-% 外圈是 1 (训练单元，用来计算平均值)
+t_fast = (0:Nr-1)/Fs;   % 快时间轴 (针对单个Chirp)
+t_slow = (0:Nd-1)*Tc;   % 慢时间轴 (针对整个帧)
 
-% 完整窗口的大小
-winSizeR = 2*Tr + 2*Gr + 1;
-winSizeD = 2*Td + 2*Gd + 1;
+%% 2. 目标设定 (Target Setup)
+% 设定一个难以检测的目标：距离远，且淹没在噪声中
+target_dist = 80;       % 目标距离 80米
+target_vel = 15;        % 目标速度 15m/s (远离)
+SNR_dB = -10;           % 信噪比 -10dB (信号比噪声还弱)
 
-% 初始化全1矩阵
-mask = ones(winSizeR, winSizeD); 
+%% 3. 信号生成 (Signal Generation)
+% 我们直接生成经过混频器(Mixer)后的 中频信号 (IF Signal)
+% 物理公式：IF = exp(j * (2*pi*f_beat*t + phase_shift))
 
-% 计算保护区域的索引范围
-guardStartR = Tr + 1;
-guardEndR   = Tr + 2*Gr + 1;
-guardStartD = Td + 1;
-guardEndD   = Td + 2*Gd + 1;
+rx_data = zeros(Nd, Nr); % 初始化数据矩阵 [128 x 512]
 
-% 将包含 CUT 和保护单元的中心区域置为 0
-mask(guardStartR:guardEndR, guardStartD:guardEndD) = 0;
+for i = 1:Nd
+    % 当前 Chirp 时刻目标的真实距离 (考虑运动)
+    % 慢时间 i 对应的距离变化体现了多普勒效应
+    r_current = target_dist + target_vel * t_slow(i);
+    
+    % 往返时延 tau
+    tau = 2 * r_current / c;
+    
+    % 差频频率 (Beat Frequency) -> 对应距离
+    f_beat = Slope * tau;
+    
+    % 相位偏移 (Phase Shift) -> 对应速度 (多普勒)
+    % 核心：4*pi*R/lambda 这一项包含了微小的距离变化引起的巨大相位旋转
+    phase_shift = 4 * pi * r_current / lambda; 
+    
+    % 生成纯净的中频信号 (复数信号)
+    sig_pure = exp(1j * (2 * pi * f_beat * t_fast + phase_shift));
+    
+    % 添加高斯白噪声 (AWGN)
+    sig_noisy = awgn(sig_pure, SNR_dB, 'measured');
+    
+    % 填入数据矩阵
+    rx_data(i, :) = sig_noisy;
+end
 
-% 归一化掩码（这点很重要，相当于直接求平均值）
-numTrainCells = sum(mask(:)); % 训练单元的总个数
-mask = mask / numTrainCells; 
+%% 4. 可视化：原始信号
+figure('Position', [100, 100, 1200, 800]);
+subplot(2,2,1);
+plot(t_fast*1e6, real(rx_data(1,:)));
+title(['原始时域信号 (第1个Chirp, SNR=' num2str(SNR_dB) 'dB)']);
+xlabel('时间 (us)'); ylabel('幅度');
+grid on;
+% 说明：根本看不出有正弦波，全是噪声
 
-%% 4. 执行 CA-CFAR 检测
-% 计算门限因子 Alpha
-% 对于平方律检波 CA-CFAR，Alpha 计算公式如下：
-alpha = numTrainCells * (Pfa^(-1/numTrainCells) - 1); 
+%% 5. 第一步：脉冲压缩 (Range FFT)
+% 原理：将时域上的长脉冲能量，在频率上聚焦成一个峰
+range_win = hamming(Nr).'; % 加窗抑制旁瓣
+range_profile_matrix = zeros(Nd, Nr);
 
-% 1. 计算每一个点周围的噪声平均功率 (Noise Floor)
-% 使用二维卷积快速实现滑窗均值计算
-noiseMap = conv2(RDM, mask, 'same'); 
+for i = 1:Nd
+    % 对每一行(每个Chirp)做 FFT
+    range_profile_matrix(i, :) = fft(rx_data(i, :) .* range_win); 
+end
 
-% 2. 计算最终的检测门限
-thresholdMap = noiseMap * alpha;
+% 转换距离坐标轴
+range_axis = (0:Nr-1) * Fs * c / (2 * Slope) / Nr;
 
-% 3. 比较：信号 > 门限 ?
-detectionMap = (RDM > thresholdMap);
+subplot(2,2,2);
+plot(range_axis, db(abs(range_profile_matrix(1, :))));
+title('脉冲压缩后 (Range FFT)');
+xlabel('距离 (m)'); ylabel('幅度 (dB)');
+xlim([0 150]);
+grid on;
+% 说明：此时可能隐约能看到一个峰，但因为噪声大，可能还是不明显
 
-% 4. 去除边缘效应 (因为卷积在边缘处计算不准)
-edgeR = Tr + Gr;
-edgeD = Td + Gd;
-detectionMap(1:edgeR, :) = 0; detectionMap(end-edgeR:end, :) = 0;
-detectionMap(:, 1:edgeD) = 0; detectionMap(:, end-edgeD:end) = 0;
+%% 6. 第二步：相参积累 (Doppler FFT)
+% 原理：利用相位的一致性，把128个Chirp的能量叠加起来
+doppler_win = hamming(Nd); % 加窗
+final_map = zeros(Nd, Nr);
 
-%% 5. 结果提取与绘图
-[detR, detD] = find(detectionMap); % 提取检测到的坐标
+% 对每一列(每个距离点)在慢时间维度做 FFT
+for j = 1:Nr
+    final_map(:, j) = fftshift(fft(range_profile_matrix(:, j) .* doppler_win)); 
+end
 
-% --- 绘图 ---
-figure('Position', [100, 100, 1000, 400]);
+% 转换速度坐标轴
+vel_axis = (-Nd/2 : Nd/2-1) * (lambda / (2 * Tc * Nd));
 
-% 原始 RDM 图
-subplot(1, 2, 1);
-imagesc(10*log10(RDM)); 
-axis xy; colormap('jet'); colorbar;
-title('原始距离-多普勒图 (Log scale)');
-xlabel('Doppler'); ylabel('Range');
-clim([0 20]); % 限制颜色范围以便看清噪声
+%% 7. 最终结果：距离-多普勒图 (Range-Doppler Map)
+subplot(2,2,[3,4]);
+% 使用 mesh 绘制 3D 效果
+samples_to_show_r = find(range_axis > 150, 1); % 只画前150米
+mesh(range_axis(1:samples_to_show_r), vel_axis, db(abs(final_map(:, 1:samples_to_show_r))));
+view(0, 90); % 俯视图
+colorbar;
+title('相参积累后 (Range-Doppler Map 2D-FFT)');
+xlabel('距离 (m)'); ylabel('速度 (m/s)');
+zlabel('幅度 (dB)');
+axis tight;
 
-% CFAR 检测结果图
-subplot(1, 2, 2);
-imagesc(detectionMap); 
-axis xy; colormap('gray'); 
-title(['CA-CFAR 检测结果 (Pfa=', num2str(Pfa), ')']);
-xlabel('Doppler'); ylabel('Range');
+%% 结果验证输出
+[max_val, max_idx] = max(abs(final_map(:)));
+[v_idx, r_idx] = ind2sub(size(final_map), max_idx);
 
-% 在结果图上标出中心点（可选）
-hold on;
-plot(detD, detR, 'rs', 'MarkerSize', 8, 'LineWidth', 1.5);
-legend('检测点');
+calc_dist = range_axis(r_idx);
+calc_vel = vel_axis(v_idx);
 
-fprintf('检测到目标点数量: %d\n', length(detR));
+fprintf('--- 仿真结果 ---\n');
+fprintf('真实目标: 距离 %.2fm, 速度 %.2fm/s\n', target_dist, target_vel);
+fprintf('雷达解算: 距离 %.2fm, 速度 %.2fm/s\n', calc_dist, calc_vel);
+fprintf('相参积累增益: 信号从噪声中“浮现”了出来。\n');
