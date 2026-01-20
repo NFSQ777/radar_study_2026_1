@@ -101,6 +101,28 @@ xlim([0, 3000]);
 xline(R_target, 'r--', '目标位置');
 legend('脉压输出', ['真实目标: ' num2str(R_target) 'm']);
 
+%% ========== 新增：脉压后信号的频域波形显示 ==========
+% 1. 计算脉压后信号的频域特征
+N_fft_so = 2^nextpow2(length(So));  % 取2的幂次，提升FFT计算效率
+F_So = fftshift(fft(So, N_fft_so)); % FFT + 频谱移位（零频居中）
+f_so = linspace(-Fs/2, Fs/2, N_fft_so); % 频率轴（Nyquist范围，单位Hz）
+
+% 2. 绘制脉压后信号的频域波形
+figure('Name', '脉压后信号频域分析');
+subplot(2,1,1);
+% 幅度谱（线性刻度）
+plot(f_so/1e6, abs(F_So)/max(abs(F_So)));
+title('脉压后信号频谱（线性幅度）');
+xlabel('频率 (MHz)'); ylabel('归一化幅度');
+grid on; xlim([-B/1e6-5, B/1e6+5]); % 聚焦信号带宽范围
+
+subplot(2,1,2);
+% 幅度谱（dB刻度，更易观察细节）
+plot(f_so/1e6, 20*log10(abs(F_So)/max(abs(F_So))));
+title('脉压后信号频谱（dB幅度）');
+xlabel('频率 (MHz)'); ylabel('幅度 (dB)');
+grid on; xlim([-B/1e6-5, B/1e6+5]); ylim([-60, 0]); % 限制dB范围，压制噪声
+
 %% 6. 理论分辨率计算
 Resolution_theory = c / (2 * B);
 fprintf('理论距离分辨率: %.2f 米\n', Resolution_theory);
