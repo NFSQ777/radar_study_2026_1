@@ -22,7 +22,7 @@ Gate_len = round(PRI/dt); % 一个PRI内的采样点数
 
 % 目标参数 (可随意修改)
 target_R0 = 35000;       % 目标距离 (m)
-target_V = 15;          % 目标速度 (m/s) [正值: 靠近雷达]
+target_V = 20;          % 目标速度 (m/s) [正值: 靠近雷达]
 
 %% 2. 发射信号生成 (LFM)
 t = (-Tp/2 : dt : Tp/2 - dt); 
@@ -30,7 +30,12 @@ St = exp(1j * pi * K * t.^2); % LFM信号
 
 % --- 绘图1：发射信号 ---
 figure('Name','发射信号','Position',[50, 50, 600, 400]);
-subplot(2,1,1); plot(t*1e6, real(St)); title('发射信号实部'); xlabel('时间 (\mus)'); grid on;
+subplot(2,1,1); 
+plot(t*1e6, real(St),'b','DisplayName','I路（同相分量）'); 
+title('发射信号'); xlabel('时间 (\mus)'); 
+hold on;
+plot(t*1e6, imag(St), 'r', 'DisplayName','Q路（正交分量）');
+grid on;
 subplot(2,1,2); plot(linspace(-B/2, B/2, length(St))/1e6, abs(fftshift(fft(St))));
 title('发射信号频谱'); xlabel('频率 (MHz)'); grid on;
 
@@ -54,8 +59,8 @@ for m = 1 : NumPulses
     end
 end
 
-% 增加噪声 (SNR = -10dB, 噪声稍微大一点更能看出处理增益)
-Sr_matrix_noisy = awgn(Sr_matrix, -10, 'measured'); 
+% 增加噪声 (SNR = -20dB, 噪声稍微大一点更能看出处理增益)
+Sr_matrix_noisy = awgn(Sr_matrix, -20, 'measured'); 
 
 % --- 绘图2：时域回波 ---
 figure('Name','时域回波','Position',[100, 100, 600, 300]);
